@@ -4,6 +4,7 @@
 PATH1="/usr/local/etc/sing-box/ui"
 PATH2="/etc/sing-box/ui"
 DOWNLOAD_URL="https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+ROLLBACK_URL="https://github.com/MetaCubeX/metacubexd/archive/gh-pages.zip"
 TEMP_DIR="/tmp/zashboard_temp"
 ZIP_FILE="gh-pages.zip"
 CRON_JOB="/etc/cron.d/zashboard_update"
@@ -26,25 +27,28 @@ prepare_temp_dir() {
 
 # 下载并解压文件
 download_and_extract() {
-    wget -O "$TEMP_DIR/$ZIP_FILE" "$DOWNLOAD_URL"
+    local url=$1
+    wget -O "$TEMP_DIR/$ZIP_FILE" "$url"
     unzip -q "$TEMP_DIR/$ZIP_FILE" -d "$TEMP_DIR"
 }
 
 # 删除旧文件并移动新文件
 update_ui_folder() {
     local target_path=$1
+    local extracted_dir=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+
+    if [ -z "$extracted_dir" ]; then
+        echo "未找到解压后的目录，请检查下载链接或解压过程。"
+        exit 1
+    fi
 
     # 删除旧文件
     rm -rf "$target_path"/*
 
-    # 确保解压路径存在
-    if [ -d "$TEMP_DIR/zashboard-gh-pages" ]; then
-        mv "$TEMP_DIR/zashboard-gh-pages"/* "$target_path/"
-    else
-        echo "未找到解压后的目录，请检查下载链接或解压过程。"
-        exit 1
-    fi
+    # 移动新文件
+    mv "$extracted_dir"/* "$target_path/"
 }
+
 
 # 重启 singbox
 restart_singbox() {
@@ -105,7 +109,45 @@ stop_schedule() {
 update_ui() {
     check_dependencies
     prepare_temp_dir
-    download_and_extract
+    download_and_extract "$DOWNLOAD_URL"
+
+    if [ -d "$PATH1" ] && [ -d "$PATH2" ]; then
+        echo "检测到 $PATH1 和 $PATH2 都存在，请选择："
+        echo "1. 更新 $PATH1"
+        echo "2. 更新 $PATH2"
+        read -p "请输入选择(1/2): " choice
+
+        case $choice in
+        1)
+            update_ui_folder "$PATH1"
+            ;;
+        2)
+            update_ui_folder "$PATH2"
+            ;;
+        *)
+            echo "无效的选择，退出。"
+            exit 1
+            ;;
+        esac
+    elif [ -d "$PATH1" ]; then
+        echo "检测到 $PATH1 存在，开始更新。"
+        update_ui_folder "$PATH1"
+    elif [ -d "$PATH2" ]; then
+        echo "检测到 $PATH2 存在，开始更新。"
+        update_ui_folder "$PATH2"
+    else
+        echo "未检测到目标路径，请确保至少有一个路径存在。"
+        exit 1
+    fi
+
+    restart_singbox
+}
+
+# 退回原来 UI 的完整流程
+rollback_ui() {
+    check_dependencies
+    prepare_temp_dir
+    download_and_extract "$ROLLBACK_URL"
 
     if [ -d "$PATH1" ] && [ -d "$PATH2" ]; then
         echo "检测到 $PATH1 和 $PATH2 都存在，请选择："
@@ -145,7 +187,8 @@ main_menu() {
     echo "1. 立即更新 Zashboard UI"
     echo "2. 定时更新 Zashboard UI"
     echo "3. 停止自动更新"
-    read -p "请输入选择(1/2/3): " main_choice
+    echo "4. 退回原来 UI 版本"
+    read -p "请输入选择(1/2/3/4): " main_choice
 
     case $main_choice in
     1)
@@ -156,6 +199,9 @@ main_menu() {
         ;;
     3)
         stop_schedule
+        ;;
+    4)
+        rollback_ui
         ;;
     *)
         echo "无效的选择，退出。"
